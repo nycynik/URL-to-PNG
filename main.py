@@ -8,7 +8,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import argparse
 from colorama import init, Fore, Back, Style
-from screenshot import capture_full_page_screenshot, get_page_title, create_diff_image
+from screenshot import capture_full_page_screenshot, get_page_title, create_diff_image, analyze_page_structure
 from reporting import generate_comparison_report_csv, generate_summary_report
 
 # Configure logging
@@ -136,6 +136,7 @@ def load_progress(output_folder, csv_file):
             logger.warning(f"Could not load progress file: {e}")
     return set(), []
 
+
 def save_progress(output_folder, completed_rows, comparison_results, csv_file):
     """Save progress and results to resume later."""
     progress_file = os.path.join(output_folder, "progress.json")
@@ -149,6 +150,7 @@ def save_progress(output_folder, completed_rows, comparison_results, csv_file):
             }, f, indent=2)
     except Exception as e:
         logger.error(f"Could not save progress: {e}")
+
 
 def fetch_urls(csv_file, output_folder):
     """
@@ -255,6 +257,19 @@ def fetch_urls(csv_file, output_folder):
                     'metrics': None
                 }
 
+                # Collect structural data for both pages
+                old_structure = {}
+                new_structure = {}
+
+                try:
+                    print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Analyzing page structure for {old_url}...{Style.RESET_ALL}")
+                    old_structure = analyze_page_structure(driver, old_url)
+                    if new_url:
+                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Analyzing page structure for {new_url}...{Style.RESET_ALL}")
+                        new_structure = analyze_page_structure(driver, new_url)
+                except Exception as e:
+                    logger.warning(f"Could not analyze page structures: {e}")
+
                 # Take screenshot of old URL with retry logic
                 old_file_path = os.path.join(subfolder_path, "old.png")
                 screenshot_success = False
@@ -285,9 +300,9 @@ def fetch_urls(csv_file, output_folder):
                             print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {new_url}: {Style.BRIGHT}{Fore.BLUE}{new_file_path}{Style.RESET_ALL}")
                             result['new_screenshot_exists'] = True
 
-                            # Create diff image and get metrics
+                            # Create diff image and get metrics with structural analysis
                             diff_file_path = os.path.join(subfolder_path, "diff.png")
-                            metrics = create_diff_image(old_file_path, new_file_path, diff_file_path)
+                            metrics = create_diff_image(old_file_path, new_file_path, diff_file_path, old_structure, new_structure)
                             print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Diff image created: {Style.BRIGHT}{Fore.BLUE}{diff_file_path}{Style.RESET_ALL}")
                             result['diff_exists'] = True
                             result['metrics'] = metrics
@@ -403,7 +418,7 @@ def confirm_options_and_fetch_urls(csv_file, output_folder, skip_confirmation=Fa
         return
 
     # Call the function to fetch URLs
-    results = fetch_urls(csv_file, output_folder)
+    fetch_urls(csv_file, output_folder)
 
 
 def main():

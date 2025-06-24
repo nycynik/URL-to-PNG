@@ -8,9 +8,129 @@ from webdriver_manager.chrome import ChromeDriverManager
 from PIL import Image, ImageEnhance
 import numpy as np
 from skimage.metrics import structural_similarity as ssim
+from selenium.webdriver.common.by import By
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def analyze_page_structure(driver, url):
+    """
+    Analyze the semantic structure of a webpage by counting key HTML elements.
+    Args:
+        driver (webdriver): Selenium WebDriver instance.
+        url (str): URL of the page to analyze.
+    Returns:
+        dict: Count of semantic HTML elements, or empty dict if failed.
+    """
+    try:
+        # Check if driver session is still valid
+        try:
+            driver.current_url  # This will raise an exception if session is invalid
+        except Exception as session_error:
+            logger.error(f"Driver session invalid when analyzing structure for {url}: {session_error}")
+            return {}
+
+        driver.get(url)
+        time.sleep(2)  # Allow page to load
+        
+        # Define semantic HTML elements to count
+        semantic_elements = [
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',  # Headings
+            'section', 'article', 'aside', 'nav', 'header', 'footer', 'main',  # Semantic sections
+            'p',  # Paragraphs
+            'ul', 'ol', 'li',  # Lists
+            'table', 'thead', 'tbody', 'tr', 'th', 'td',  # Tables
+            'form', 'input', 'textarea', 'select', 'button',  # Forms
+            'a',  # Links
+            'img',  # Images
+            'video', 'audio',  # Media
+            'blockquote', 'cite',  # Quotes
+            'code', 'pre',  # Code
+            'figure', 'figcaption'  # Figures
+        ]
+        
+        structure = {}
+        total_elements = 0
+        
+        for element_type in semantic_elements:
+            try:
+                elements = driver.find_elements(By.TAG_NAME, element_type)
+                count = len(elements)
+                structure[element_type] = count
+                total_elements += count
+            except Exception as e:
+                logger.warning(f"Could not count {element_type} elements: {e}")
+                structure[element_type] = 0
+        
+        # Add total count for reference
+        structure['_total_semantic_elements'] = total_elements
+        
+        logger.info(f"Analyzed structure for {url}: {total_elements} semantic elements")
+        return structure
+        
+    except Exception as e:
+        logger.warning(f"Could not analyze page structure for {url}: {e}")
+        return {}
+
+
+def calculate_structural_similarity(old_structure, new_structure):
+    """
+    Calculate structural similarity between two page structures.
+    Args:
+        old_structure (dict): Structure analysis of old page.
+        new_structure (dict): Structure analysis of new page.
+    Returns:
+        dict: Structural similarity metrics.
+    """
+    if not old_structure or not new_structure:
+        return {
+            'structural_similarity': 0.0,
+            'structural_differences': {},
+            'total_structural_changes': 0
+        }
+    
+    # Get all element types that appear in either structure
+    all_elements = set(old_structure.keys()) | set(new_structure.keys())
+    all_elements.discard('_total_semantic_elements')  # Remove meta field
+    
+    if not all_elements:
+        return {
+            'structural_similarity': 100.0,
+            'structural_differences': {},
+            'total_structural_changes': 0
+        }
+    
+    differences = {}
+    total_changes = 0
+    matching_elements = 0
+    
+    for element_type in all_elements:
+        old_count = old_structure.get(element_type, 0)
+        new_count = new_structure.get(element_type, 0)
+        
+        if old_count != new_count:
+            difference = new_count - old_count
+            differences[element_type] = {
+                'old_count': old_count,
+                'new_count': new_count,
+                'difference': difference
+            }
+            total_changes += abs(difference)
+        else:
+            matching_elements += 1
+    
+    # Calculate similarity as percentage of elements that match exactly
+    total_element_types = len(all_elements)
+    similarity_percentage = (matching_elements / total_element_types * 100) if total_element_types > 0 else 100.0
+    
+    return {
+        'structural_similarity': round(similarity_percentage, 1),
+        'structural_differences': differences,
+        'total_structural_changes': total_changes,
+        'matching_element_types': matching_elements,
+        'total_element_types': total_element_types
+    }
 
 
 def trim_bottom_whitespace(image_path, tolerance=5):
@@ -221,15 +341,17 @@ def fetch_url(url, output_file):
         driver.quit()
 
 
-def create_diff_image(old_image_path, new_image_path, diff_image_path):
+def create_diff_image(old_image_path, new_image_path, diff_image_path, old_structure=None, new_structure=None):
     """
-    Create a visual diff image highlighting differences between two screenshots.
+    Create a visual diff image highlighting differences between two screenshots and calculate combined metrics.
     Args:
         old_image_path (str): Path to the old/original image.
         new_image_path (str): Path to the new/updated image.
         diff_image_path (str): Path where the diff image should be saved.
+        old_structure (dict): Optional structural analysis of old page.
+        new_structure (dict): Optional structural analysis of new page.
     Returns:
-        dict: Similarity metrics including SSIM score, change percentage, and magnitude.
+        dict: Combined visual and structural similarity metrics.
     """
     try:
         # Load both images
@@ -305,30 +427,42 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path):
         old_gray = np.array(old_img.convert('L'))
         new_gray = np.array(new_img.convert('L'))
 
-        # Calculate SSIM (returns value between -1 and 1, where 1 is identical)
+        # Calculate visual similarity (SSIM)
         ssim_score = ssim(old_gray, new_gray)
-        similarity_percentage = ((ssim_score + 1) / 2) * 100  # Convert to 0-100 scale
+        visual_similarity = ((ssim_score + 1) / 2) * 100  # Convert to 0-100 scale
 
-        # Determine change magnitude
-        if change_percentage == 0:
+        # Calculate structural similarity if structure data is provided
+        structural_metrics = calculate_structural_similarity(old_structure, new_structure)
+        structural_similarity = structural_metrics.get('structural_similarity', 100.0)
+
+        # Combine visual and structural similarities for overall score
+        # Weight visual similarity more heavily (70%) since it's the primary comparison
+        combined_similarity = (visual_similarity * 0.7) + (structural_similarity * 0.3)
+
+        # Determine change magnitude based on combined similarity
+        if combined_similarity >= 98:
             change_magnitude = "None"
-        elif change_percentage < 5:
+        elif combined_similarity >= 85:
             change_magnitude = "Minimal"
-        elif change_percentage < 20:
+        elif combined_similarity >= 70:
             change_magnitude = "Moderate"
         else:
             change_magnitude = "Significant"
 
-        # Create metrics dictionary
+        # Create comprehensive metrics dictionary
         metrics = {
-            'similarity_score': round(similarity_percentage, 1),
+            'visual_similarity': round(visual_similarity, 1),
+            'structural_similarity': round(structural_similarity, 1),
+            'similarity_score': round(combined_similarity, 1),  # Combined score for backward compatibility
             'change_percentage': round(change_percentage, 1),
             'change_magnitude': change_magnitude,
-            'ssim_raw': round(ssim_score, 3)
+            'ssim_raw': round(ssim_score, 3),
+            'structural_differences': structural_metrics.get('structural_differences', {}),
+            'total_structural_changes': structural_metrics.get('total_structural_changes', 0)
         }
 
         logger.info(f"Diff image created: {diff_image_path}")
-        logger.info(f"Similarity: {metrics['similarity_score']}%, Change: {metrics['change_percentage']}% ({metrics['change_magnitude']})")
+        logger.info(f"Visual: {metrics['visual_similarity']}%, Structural: {metrics['structural_similarity']}%, Combined: {metrics['similarity_score']}% ({metrics['change_magnitude']})")
 
         return metrics
 

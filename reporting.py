@@ -41,12 +41,16 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                 # Add metrics if available
                 if result['metrics']:
                     data.update({
+                        'visual_similarity': result['metrics'].get('visual_similarity', ''),
+                        'structural_similarity': result['metrics'].get('structural_similarity', ''),
                         'similarity_score': result['metrics']['similarity_score'],
                         'change_percentage': result['metrics']['change_percentage'],
                         'change_magnitude': result['metrics']['change_magnitude']
                     })
                 else:
                     data.update({
+                        'visual_similarity': '',
+                        'structural_similarity': '',
                         'similarity_score': '',
                         'change_percentage': '',
                         'change_magnitude': ''
@@ -97,6 +101,8 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                         'new_image': new_image_rel,
                         'diff_image': diff_image_rel,
                         'folder_name': item,
+                        'visual_similarity': '',
+                        'structural_similarity': '',
                         'similarity_score': '',
                         'change_percentage': '',
                         'change_magnitude': ''
@@ -107,7 +113,7 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
 
         # Write the CSV report
         with open(report_path, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['title', 'old_url_screenshot', 'new_url_screenshot', 'diff_image', 'similarity_score', 'change_percentage', 'change_magnitude', 'folder_name']
+            fieldnames = ['title', 'old_url_screenshot', 'new_url_screenshot', 'diff_image', 'visual_similarity', 'structural_similarity', 'similarity_score', 'change_percentage', 'change_magnitude', 'folder_name']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             # Write header
@@ -120,6 +126,8 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                     'old_url_screenshot': data['old_image'],
                     'new_url_screenshot': data['new_image'],
                     'diff_image': data['diff_image'],
+                    'visual_similarity': data['visual_similarity'],
+                    'structural_similarity': data['structural_similarity'],
                     'similarity_score': data['similarity_score'],
                     'change_percentage': data['change_percentage'],
                     'change_magnitude': data['change_magnitude'],
@@ -471,7 +479,9 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                 <tr>
                     <th>Row</th>
                     <th>Title</th>
-                    <th>Similarity</th>
+                    <th>Visual</th>
+                    <th>Structural</th>
+                    <th>Combined</th>
                     <th>Change %</th>
                     <th>Magnitude</th>
                     <th>Old Screenshot</th>
@@ -497,25 +507,33 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                     diff_link = f'<span class="status-icon status-success">✓</span> <a href="{detail["row"]}-{detail["title"].replace(" ", "_")}/diff.png" class="file-link" target="_blank">View</a>'
 
                 # Add metrics columns
-                similarity_cell = ""
+                visual_cell = ""
+                structural_cell = ""
+                combined_cell = ""
                 change_cell = ""
                 magnitude_cell = ""
 
                 if detail.get('metrics'):
                     metrics = detail['metrics']
-                    similarity_cell = f'{metrics["similarity_score"]}%'
+                    visual_cell = f'{metrics.get("visual_similarity", "-")}%' if metrics.get("visual_similarity") else "-"
+                    structural_cell = f'{metrics.get("structural_similarity", "-")}%' if metrics.get("structural_similarity") else "-"
+                    combined_cell = f'{metrics["similarity_score"]}%'
                     change_cell = f'{metrics["change_percentage"]}%'
                     magnitude_class = f'magnitude-{metrics["change_magnitude"].lower()}'
                     magnitude_cell = f'<span class="{magnitude_class}">{metrics["change_magnitude"]}</span>'
                 else:
-                    similarity_cell = "-"
+                    visual_cell = "-"
+                    structural_cell = "-"
+                    combined_cell = "-"
                     change_cell = "-"
                     magnitude_cell = "-"
 
                 f.write(f"""                <tr>
                     <td>{detail['row']}</td>
                     <td class="title-cell" title="{detail['title']}">{detail['title']}</td>
-                    <td class="metrics-cell">{similarity_cell}</td>
+                    <td class="metrics-cell">{visual_cell}</td>
+                    <td class="metrics-cell">{structural_cell}</td>
+                    <td class="metrics-cell">{combined_cell}</td>
                     <td class="metrics-cell">{change_cell}</td>
                     <td class="metrics-cell">{magnitude_cell}</td>
                     <td>{old_link}</td>
@@ -537,9 +555,9 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
 
           rows.forEach(row => {
               let show = true;
-              const magnitudeCell = row.cells[4]; // Magnitude column
+              const magnitudeCell = row.cells[6]; // Magnitude column (was 4, now 6 due to added Visual/Structural columns)
               const titleCell = row.cells[1]; // Title column
-              const diffCell = row.cells[7]; // Diff image column
+              const diffCell = row.cells[9]; // Diff image column (was 7, now 9 due to added columns)
 
               // Apply magnitude filter
               if (magnitudeFilter) {

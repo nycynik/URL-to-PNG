@@ -37,6 +37,26 @@ For each URL pair in your CSV, the tool creates a subfolder named with the row n
   - **Yellow highlights** - Other changes (moved or modified content)
   - **Dimmed background** - Unchanged areas for context
 
+## Comparison Metrics
+
+The tool provides two types of similarity analysis:
+
+### Visual Similarity
+- Uses image comparison (SSIM) to detect visual changes in the screenshots
+- Measures pixel-level differences, layout changes, and visual content modifications
+- Reported as a percentage where 100% means visually identical
+
+### Structural Similarity  
+- Analyzes semantic HTML elements (headings, sections, forms, etc.) between pages
+- Counts elements like `<h1>`, `<h2>`, `<section>`, `<article>`, `<p>`, `<ul>`, etc.
+- Compares element counts to verify content structure consistency
+- Reported as a percentage based on matching element types
+
+### Combined Score
+- Weighs visual similarity at 70% and structural similarity at 30%
+- Provides a single **Magnitude** rating: None, Minimal, Moderate, or Significant
+- Used to categorize the overall level of change between page versions
+
 ## Reports
 
 After processing all comparisons, the tool automatically generates two reports in the output folder:
