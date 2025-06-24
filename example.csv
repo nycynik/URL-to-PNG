@@ -1,3 +1,4 @@
-url
-https://google.com
-https://github.com
+old_url,new_url
+file:///Users/mlynch/dev/mike/URL-to-PNG/test/page_old.html,file:///Users/mlynch/dev/mike/URL-to-PNG/test/page_new.html
+https://google.com,https://google.com
+https://github.com,https://github.com

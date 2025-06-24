@@ -1,34 +1,104 @@
 import os
 import csv
+import logging
+import json
+import hashlib
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-import time
 import argparse
 from colorama import init, Fore, Back, Style
+from screenshot import capture_full_page_screenshot, get_page_title, create_diff_image
+from reporting import generate_comparison_report_csv, generate_summary_report
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
-def capture_full_page_screenshot(driver, url, save_path):
-    """
-    Capture a full-page screenshot of the given URL.
-    Args:
-        driver (webdriver): Selenium WebDriver instance.
-        url (str): URL of the page to capture.
-        save_path (str): Path to save the screenshot.
-    """
-    # Function to take a full-page screenshot
+def get_csv_info(csv_file):
+    """Get identifying information about a CSV file."""
+    try:
+        # Get basic file info
+        csv_info = {
+            'filename': os.path.basename(csv_file),
+            'size': os.path.getsize(csv_file),
+            'row_count': 0,
+            'content_hash': ''
+        }
+        
+        # Count rows and create content hash
+        hasher = hashlib.md5()
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            hasher.update(content.encode('utf-8'))
+            csv_info['content_hash'] = hasher.hexdigest()
+            
+            # Count rows (excluding header)
+            reader = csv.reader(content.strip().split('\n'))
+            next(reader, None)  # Skip header
+            csv_info['row_count'] = sum(1 for row in reader if row)
+        
+        return csv_info
+    except Exception as e:
+        logger.warning(f"Could not get CSV info for {csv_file}: {e}")
+        return {
+            'filename': os.path.basename(csv_file) if csv_file else 'unknown',
+            'size': 0,
+            'row_count': 0,
+            'content_hash': ''
+        }
 
-    driver.get(url)
-    # Allow the page to load
-    time.sleep(2)
-    # Capture full page screenshot
-    original_size = driver.get_window_size()
-    required_width = driver.execute_script('return document.body.parentNode.scrollWidth')
-    required_height = driver.execute_script('return document.body.parentNode.scrollHeight')
-    driver.set_window_size(required_width, required_height)
-    driver.save_screenshot(save_path)
-    driver.set_window_size(original_size['width'], original_size['height'])
 
+def csv_matches_progress(stored_csv_info, current_csv_info):
+    """Check if the current CSV matches the one from the progress file."""
+    if not stored_csv_info or not current_csv_info:
+        return False
+    
+    # Compare filename, size, and content hash
+    return (stored_csv_info.get('filename') == current_csv_info.get('filename') and
+            stored_csv_info.get('size') == current_csv_info.get('size') and
+            stored_csv_info.get('content_hash') == current_csv_info.get('content_hash'))
+
+
+def load_progress(output_folder, csv_file):
+    """Load progress from previous run and validate it matches the current CSV."""
+    progress_file = os.path.join(output_folder, "progress.json")
+    if os.path.exists(progress_file):
+        try:
+            with open(progress_file, 'r') as f:
+                progress = json.load(f)
+                
+                # Check if the progress matches the current CSV file
+                stored_csv_info = progress.get('csv_info', {})
+                current_csv_info = get_csv_info(csv_file)
+                
+                if not csv_matches_progress(stored_csv_info, current_csv_info):
+                    print(f"{Fore.YELLOW}Warning: Found existing progress file, but it appears to be for a different CSV.{Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}Progress file CSV: {stored_csv_info.get('filename', 'unknown')} ({stored_csv_info.get('row_count', 0)} rows){Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}Current CSV: {current_csv_info.get('filename', 'unknown')} ({current_csv_info.get('row_count', 0)} rows){Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}Starting fresh with new CSV file.{Style.RESET_ALL}")
+                    return set(), []
+                
+                completed_rows = set(progress.get('completed_rows', []))
+                previous_results = progress.get('comparison_results', [])
+                return completed_rows, previous_results
+        except Exception as e:
+            logger.warning(f"Could not load progress file: {e}")
+    return set(), []
+
+def save_progress(output_folder, completed_rows, comparison_results, csv_file):
+    """Save progress and results to resume later."""
+    progress_file = os.path.join(output_folder, "progress.json")
+    try:
+        csv_info = get_csv_info(csv_file)
+        with open(progress_file, 'w') as f:
+            json.dump({
+                'completed_rows': list(completed_rows),
+                'comparison_results': comparison_results,
+                'csv_info': csv_info
+            }, f, indent=2)
+    except Exception as e:
+        logger.error(f"Could not save progress: {e}")
 
 def fetch_urls(csv_file, output_folder):
     """
@@ -36,46 +106,162 @@ def fetch_urls(csv_file, output_folder):
     Args:
         csv_file (str): Path to the CSV file containing URLs.
         output_folder (str): Path to the output folder for screenshots.
+    Returns:
+        list: List of comparison results with metrics for reporting.
     """
 
-    # Initialize the WebDriver
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    # Initialize the WebDriver with headless options for stability
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument("--headless")  # Run without UI - prevents screensaver issues
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-web-security")
+    chrome_options.add_argument("--allow-running-insecure-content")
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument("--window-size=1920,1080")  # Set default window size for headless
+
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    # Load progress from previous runs
+    completed_rows, previous_results = load_progress(output_folder, csv_file)
+
+    # Start with previous results and add new ones
+    comparison_results = previous_results.copy()
+
+    if completed_rows:
+        print(f"{Fore.YELLOW}Resuming from previous run. Skipping {len(completed_rows)} completed rows.{Style.RESET_ALL}")
 
     try:
-        # Set the window size to a reasonable default
-        driver.set_window_size(1920, 1080)
 
         # Create output folder if it doesn't exist
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
+        # Here we go
+        print(f"\n{Back.LIGHTBLACK_EX}{Fore.CYAN}Comparing Pages{Style.RESET_ALL}")
+
         # Read URLs from a CSV file after skipping header
         with open(csv_file, mode='r') as file:
             reader = csv.reader(file)
             next(reader)  # Skip header
+            row_number = 1
             for row in reader:
                 if not row:
                     continue
-                # Assuming the URL is in the first column
-                url = row[0]
-                file_name = f"screenshot_{url.replace('http://', '').replace('https://', '').replace('/', '_')}.png"
-                # Ensure the file name is valid
-                file_name = ''.join(c for c in file_name if c.isalnum() or c in ('_', '-', '.'))
-                # Ensure the file name not too long
-                if len(file_name) > 255:
-                    file_name = file_name[:255]
-                file_path = os.path.join(output_folder, file_name)
+
+                # Expect two columns: old_url, new_url
+                old_url = row[0] if len(row) > 0 else ""
+                new_url = row[1] if len(row) > 1 else ""
+
+                if not old_url:
+                    continue
+
+                # Check if this row was already completed
+                if row_number in completed_rows:
+                    print(f"{Fore.LIGHTBLACK_EX}┅ {Fore.CYAN}Processing row {Style.BRIGHT}{Fore.CYAN}{row_number}{Style.RESET_ALL}{Fore.WHITE}: {Fore.GREEN}Skipping ({Style.DIM}Already completed{Style.BRIGHT}{Fore.GREEN}){Style.RESET_ALL}")
+                    row_number += 1
+                    continue
+
+                # Get page title from the first URL
                 try:
-                    capture_full_page_screenshot(driver, url, file_path)
-                    print(f"Screenshot saved for {url} to {file_path}")
+                    [page_title, original_title] = get_page_title(driver, old_url)
+                except Exception as title_error:
+                    logger.error(f"Failed to get title for {old_url}, continuing without title: {title_error}")
+                    page_title = ""
+                    original_title = ""
+
+                # Create subfolder name: number + title (if available)
+                if page_title:
+                    subfolder_name = f"{row_number}-{page_title}"
+                else:
+                    subfolder_name = str(row_number)
+
+                # Status update
+                print(f"{Fore.LIGHTBLACK_EX}╓ {Fore.CYAN}Processing row {Style.BRIGHT}{Fore.CYAN}{row_number}{Style.RESET_ALL}{Fore.WHITE}: {Style.BRIGHT}{Fore.CYAN}{page_title if page_title else subfolder_name}{Style.RESET_ALL}")
+
+                # Create subfolder path
+                try:
+                    subfolder_path = os.path.join(output_folder, subfolder_name)
+                    os.makedirs(subfolder_path, exist_ok=True)
                 except Exception as e:
-                    print(f"Error capturing {url}: {e}")
+                    print(f"Error creating subfolder {subfolder_name}: {e}")
+                    continue
+
+                # Initialize result data
+                result = {
+                    'row_number': row_number,
+                    'title': page_title or "No title",
+                    'original_title': original_title,
+                    'old_url': old_url,
+                    'new_url': new_url,
+                    'subfolder_name': subfolder_name,
+                    'old_screenshot_exists': False,
+                    'new_screenshot_exists': False,
+                    'diff_exists': False,
+                    'metrics': None
+                }
+
+                try:
+                    # Take screenshot of old URL
+                    old_file_path = os.path.join(subfolder_path, "old.png")
+                    capture_full_page_screenshot(driver, old_url, old_file_path)
+                    print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {old_url}: {Style.BRIGHT}{Fore.BLUE}{old_file_path}{Style.RESET_ALL}")
+                    result['old_screenshot_exists'] = True
+
+                    # Take screenshot of new URL if provided
+                    if new_url:
+                        new_file_path = os.path.join(subfolder_path, "new.png")
+                        capture_full_page_screenshot(driver, new_url, new_file_path)
+                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {new_url}: {Style.BRIGHT}{Fore.BLUE}{new_file_path}{Style.RESET_ALL}")
+                        result['new_screenshot_exists'] = True
+
+                        # Create diff image and get metrics
+                        diff_file_path = os.path.join(subfolder_path, "diff.png")
+                        metrics = create_diff_image(old_file_path, new_file_path, diff_file_path)
+                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Diff image created: {Style.BRIGHT}{Fore.BLUE}{diff_file_path}{Style.RESET_ALL}")
+                        result['diff_exists'] = True
+                        result['metrics'] = metrics
+
+                except Exception as e:
+                    print(f"Error capturing screenshots for row {row_number}: {e}")
+
+                # Add result to our collection
+                comparison_results.append(result)
+
+                # Mark row as completed and save progress
+                completed_rows.add(row_number)
+                save_progress(output_folder, completed_rows, comparison_results, csv_file)
+                print(f"{Fore.LIGHTBLACK_EX}╙─ {Fore.BLUE}Complete{Style.RESET_ALL}")
+
+                row_number += 1
 
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
         # Close the driver
         driver.quit()
+
+    # Generate reports after all comparisons are complete
+    try:
+        print(f"{Fore.CYAN}Generating reports...{Style.RESET_ALL}")
+
+        # Generate CSV report with metrics
+        csv_report = generate_comparison_report_csv(output_folder, comparison_results)
+        if csv_report:
+            print(f"{Fore.GREEN}CSV report generated: {csv_report}{Style.RESET_ALL}")
+
+        # Generate summary report with metrics
+        summary_report = generate_summary_report(output_folder, comparison_results)
+        if summary_report:
+            print(f"{Fore.GREEN}Summary report generated: {summary_report}{Style.RESET_ALL}")
+
+    except Exception as e:
+        print(f"{Fore.YELLOW}Warning: Could not generate reports: {e}{Style.RESET_ALL}")
+
+    return comparison_results
 
 
 def confirm_options_and_fetch_urls(csv_file, output_folder, skip_confirmation=False):
@@ -90,6 +276,8 @@ def confirm_options_and_fetch_urls(csv_file, output_folder, skip_confirmation=Fa
     # Initialize colorama
     init()
 
+    print(f'{Style.BRIGHT}{Back.LIGHTBLACK_EX}{Fore.CYAN}  URL Comparision Tool  {Style.RESET_ALL}')
+
     # Verify the CSV:
     # Check if the CSV file exists
     if not os.path.exists(csv_file):
@@ -101,35 +289,47 @@ def confirm_options_and_fetch_urls(csv_file, output_folder, skip_confirmation=Fa
         print(f"{Back.WHITE} {Fore.RED}ERROR{Fore.CYAN}: {Style.RESET_ALL} CSV file {csv_file} is empty.")
         return
 
+    # Check for existing progress
+    progress_file = os.path.join(output_folder, "progress.json")
+    progress_info = ""
+    if os.path.exists(progress_file):
+        try:
+            completed_rows, _ = load_progress(output_folder, csv_file)
+            if completed_rows:
+                max_completed = max(completed_rows)
+                progress_info = f" {Fore.YELLOW}(resuming from row {max_completed + 1}, {len(completed_rows)} completed){Style.RESET_ALL}"
+        except Exception:
+            pass
+
     # Print the options back to the user, and ask for confirmation
-    path_status = " (exists)" if os.path.exists(output_folder) and os.path.isdir(output_folder) else f" {Fore.GREEN}(will be created)"
+    path_status = " (folder exists)" if os.path.exists(output_folder) and os.path.isdir(output_folder) else f" {Fore.GREEN}(will be created)"
     print(f"{Style.BRIGHT}CSV file     {Fore.CYAN}:{Style.RESET_ALL} {csv_file}")
-    print(f"{Style.BRIGHT}Output folder{Fore.CYAN}:{Style.RESET_ALL} {output_folder} {path_status}{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}Output folder{Fore.CYAN}:{Style.RESET_ALL} {output_folder} {path_status}{progress_info}{Style.RESET_ALL}")
     # confirm the options, but get only one character
     print(f"\nPlease confirm the options above.{Style.RESET_ALL}")
     print(f"Press '{Style.BRIGHT}y{Style.RESET_ALL}' to confirm, or any other key to exit.{Style.RESET_ALL}")
 
     if not skip_confirmation:
-        confirm = input("\nEvereything look good so far? (y/n): ")
+        confirm = input(f"\n{Style.BRIGHT}{Fore.YELLOW}Everything look good so far? {Style.DIM}{Fore.GREEN}[y/{Style.BRIGHT}{Fore.GREEN}N{Style.DIM}{Fore.GREEN}]{Style.RESET_ALL}: ")
         if confirm.lower() != 'y':
-            print("Exiting.")
+            print(f"{Fore.RED}Exiting.{Style.RESET_ALL}")
             return
 
     # Check if the output folder exists
     if not os.path.exists(output_folder):
-        print(f"Output folder {output_folder} does not exist. Creating it.")
-        os.makedirs(output_folder)    
+        print(f"{Fore.YELLOW}Output folder {output_folder} does not exist. {Fore.GREEN}Creating it.{Style.RESET_ALL}")
+        os.makedirs(output_folder)
     # Check if the output folder is valid
     if not os.path.isdir(output_folder):
-        print(f"Output folder {output_folder} is not a directory.")
-        return    
+        print(f"{Fore.RED}ERROR: Output folder {output_folder} is not a directory.{Style.RESET_ALL}")
+        return
     # Check if the output folder is writable
     if not os.access(output_folder, os.W_OK):
-        print(f"Output folder {output_folder} is not writable.")
+        print(f"{Fore.RED}ERROR: Output folder {output_folder} is not writable.{Style.RESET_ALL}")
         return
 
     # Call the function to fetch URLs
-    fetch_urls(csv_file, output_folder='output')
+    results = fetch_urls(csv_file, output_folder)
 
 
 def main():
