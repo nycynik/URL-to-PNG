@@ -25,19 +25,19 @@ def get_csv_info(csv_file):
             'row_count': 0,
             'content_hash': ''
         }
-        
+
         # Count rows and create content hash
         hasher = hashlib.md5()
         with open(csv_file, 'r', encoding='utf-8') as f:
             content = f.read()
             hasher.update(content.encode('utf-8'))
             csv_info['content_hash'] = hasher.hexdigest()
-            
+
             # Count rows (excluding header)
             reader = csv.reader(content.strip().split('\n'))
             next(reader, None)  # Skip header
             csv_info['row_count'] = sum(1 for row in reader if row)
-        
+
         return csv_info
     except Exception as e:
         logger.warning(f"Could not get CSV info for {csv_file}: {e}")
@@ -53,11 +53,61 @@ def csv_matches_progress(stored_csv_info, current_csv_info):
     """Check if the current CSV matches the one from the progress file."""
     if not stored_csv_info or not current_csv_info:
         return False
-    
+
     # Compare filename, size, and content hash
     return (stored_csv_info.get('filename') == current_csv_info.get('filename') and
             stored_csv_info.get('size') == current_csv_info.get('size') and
             stored_csv_info.get('content_hash') == current_csv_info.get('content_hash'))
+
+
+def is_driver_alive(driver):
+    """Check if the WebDriver session is still alive and responsive."""
+    try:
+        # Try a simple command that should always work if session is alive
+        driver.current_url
+        driver.title  # Another quick check
+        return True
+    except Exception as e:
+        logger.warning(f"WebDriver session appears to be dead: {e}")
+        return False
+
+
+def create_webdriver():
+    """Create a new WebDriver instance with standard options."""
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument("--headless")  # Run without UI - prevents screensaver issues
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-web-security")
+    chrome_options.add_argument("--allow-running-insecure-content")
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument("--window-size=1920,1080")  # Set default window size for headless
+
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+
+def restart_driver_if_needed(driver, row_number=None):
+    """Check if driver is alive and restart if needed."""
+    if not is_driver_alive(driver):
+        row_info = f" (row {row_number})" if row_number else ""
+        print(f"{Fore.YELLOW}WebDriver connection lost{row_info}. Restarting...{Style.RESET_ALL}")
+        logger.warning(f"WebDriver session lost{row_info}, creating new session")
+
+        try:
+            driver.quit()
+        except Exception:
+            pass  # Driver might already be dead
+
+        # Create new driver
+        new_driver = create_webdriver()
+        print(f"{Fore.GREEN}WebDriver restarted successfully{Style.RESET_ALL}")
+        logger.info("New WebDriver session created")
+        return new_driver
+
+    return driver
 
 
 def load_progress(output_folder, csv_file):
@@ -67,18 +117,18 @@ def load_progress(output_folder, csv_file):
         try:
             with open(progress_file, 'r') as f:
                 progress = json.load(f)
-                
+
                 # Check if the progress matches the current CSV file
                 stored_csv_info = progress.get('csv_info', {})
                 current_csv_info = get_csv_info(csv_file)
-                
+
                 if not csv_matches_progress(stored_csv_info, current_csv_info):
                     print(f"{Fore.YELLOW}Warning: Found existing progress file, but it appears to be for a different CSV.{Style.RESET_ALL}")
                     print(f"{Fore.YELLOW}Progress file CSV: {stored_csv_info.get('filename', 'unknown')} ({stored_csv_info.get('row_count', 0)} rows){Style.RESET_ALL}")
                     print(f"{Fore.YELLOW}Current CSV: {current_csv_info.get('filename', 'unknown')} ({current_csv_info.get('row_count', 0)} rows){Style.RESET_ALL}")
                     print(f"{Fore.YELLOW}Starting fresh with new CSV file.{Style.RESET_ALL}")
                     return set(), []
-                
+
                 completed_rows = set(progress.get('completed_rows', []))
                 previous_results = progress.get('comparison_results', [])
                 return completed_rows, previous_results
@@ -110,20 +160,8 @@ def fetch_urls(csv_file, output_folder):
         list: List of comparison results with metrics for reporting.
     """
 
-    # Initialize the WebDriver with headless options for stability
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--headless")  # Run without UI - prevents screensaver issues
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--disable-web-security")
-    chrome_options.add_argument("--allow-running-insecure-content")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument("--window-size=1920,1080")  # Set default window size for headless
-
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # Initialize the WebDriver
+    driver = create_webdriver()
 
     # Load progress from previous runs
     completed_rows, previous_results = load_progress(output_folder, csv_file)
@@ -149,6 +187,8 @@ def fetch_urls(csv_file, output_folder):
             next(reader)  # Skip header
             row_number = 1
             for row in reader:
+                start_time = os.times().elapsed
+
                 if not row:
                     continue
 
@@ -161,17 +201,28 @@ def fetch_urls(csv_file, output_folder):
 
                 # Check if this row was already completed
                 if row_number in completed_rows:
-                    print(f"{Fore.LIGHTBLACK_EX}┅ {Fore.CYAN}Processing row {Style.BRIGHT}{Fore.CYAN}{row_number}{Style.RESET_ALL}{Fore.WHITE}: {Fore.GREEN}Skipping ({Style.DIM}Already completed{Style.BRIGHT}{Fore.GREEN}){Style.RESET_ALL}")
+                    print(f"{Fore.LIGHTBLACK_EX}┅ {Fore.CYAN}Processing row {Style.BRIGHT}{Fore.CYAN}{row_number}{Style.RESET_ALL}{Fore.WHITE}: {Fore.GREEN}Skipping ({Style.DIM}Already completed{Style.NORMAL}{Fore.GREEN}){Style.RESET_ALL}")
                     row_number += 1
                     continue
+
+                # Check WebDriver health before processing this row
+                # Perform more frequent health checks for longer runs
+                if row_number % 10 == 0 or not is_driver_alive(driver):
+                    driver = restart_driver_if_needed(driver, row_number)
 
                 # Get page title from the first URL
                 try:
                     [page_title, original_title] = get_page_title(driver, old_url)
                 except Exception as title_error:
-                    logger.error(f"Failed to get title for {old_url}, continuing without title: {title_error}")
-                    page_title = ""
-                    original_title = ""
+                    logger.error(f"Failed to get title for {old_url}, retrying with new driver: {title_error}")
+                    # Try restarting driver and retry once more
+                    driver = restart_driver_if_needed(driver, row_number)
+                    try:
+                        [page_title, original_title] = get_page_title(driver, old_url)
+                    except Exception as retry_error:
+                        logger.error(f"Failed to get title for {old_url} even after driver restart: {retry_error}")
+                        page_title = ""
+                        original_title = ""
 
                 # Create subfolder name: number + title (if available)
                 if page_title:
@@ -204,29 +255,50 @@ def fetch_urls(csv_file, output_folder):
                     'metrics': None
                 }
 
-                try:
-                    # Take screenshot of old URL
-                    old_file_path = os.path.join(subfolder_path, "old.png")
-                    capture_full_page_screenshot(driver, old_url, old_file_path)
-                    print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {old_url}: {Style.BRIGHT}{Fore.BLUE}{old_file_path}{Style.RESET_ALL}")
-                    result['old_screenshot_exists'] = True
+                # Take screenshot of old URL with retry logic
+                old_file_path = os.path.join(subfolder_path, "old.png")
+                screenshot_success = False
+                max_retries = 2
 
-                    # Take screenshot of new URL if provided
-                    if new_url:
-                        new_file_path = os.path.join(subfolder_path, "new.png")
-                        capture_full_page_screenshot(driver, new_url, new_file_path)
-                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {new_url}: {Style.BRIGHT}{Fore.BLUE}{new_file_path}{Style.RESET_ALL}")
-                        result['new_screenshot_exists'] = True
+                for attempt in range(max_retries):
+                    try:
+                        capture_full_page_screenshot(driver, old_url, old_file_path)
+                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {old_url}: {Style.BRIGHT}{Fore.BLUE}{old_file_path}{Style.RESET_ALL}")
+                        result['old_screenshot_exists'] = True
+                        screenshot_success = True
+                        break
+                    except Exception as e:
+                        logger.error(f"Screenshot attempt {attempt + 1} failed for {old_url}: {e}")
+                        if attempt < max_retries - 1:  # Don't restart on last attempt
+                            print(f"{Fore.LIGHTBLACK_EX}╟── {Fore.YELLOW}Screenshot failed, restarting WebDriver and retrying...{Style.RESET_ALL}")
+                            driver = restart_driver_if_needed(driver, row_number)
+                        else:
+                            print(f"{Fore.LIGHTBLACK_EX}╟── {Fore.RED} Failed to capture screenshot for {old_url} after {max_retries} attempts{Style.RESET_ALL}")
 
-                        # Create diff image and get metrics
-                        diff_file_path = os.path.join(subfolder_path, "diff.png")
-                        metrics = create_diff_image(old_file_path, new_file_path, diff_file_path)
-                        print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Diff image created: {Style.BRIGHT}{Fore.BLUE}{diff_file_path}{Style.RESET_ALL}")
-                        result['diff_exists'] = True
-                        result['metrics'] = metrics
+                # Take screenshot of new URL if old screenshot succeeded and new URL is provided
+                if screenshot_success and new_url:
+                    new_file_path = os.path.join(subfolder_path, "new.png")
 
-                except Exception as e:
-                    print(f"Error capturing screenshots for row {row_number}: {e}")
+                    for attempt in range(max_retries):
+                        try:
+                            capture_full_page_screenshot(driver, new_url, new_file_path)
+                            print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Screenshot saved for {new_url}: {Style.BRIGHT}{Fore.BLUE}{new_file_path}{Style.RESET_ALL}")
+                            result['new_screenshot_exists'] = True
+
+                            # Create diff image and get metrics
+                            diff_file_path = os.path.join(subfolder_path, "diff.png")
+                            metrics = create_diff_image(old_file_path, new_file_path, diff_file_path)
+                            print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.BLUE}Diff image created: {Style.BRIGHT}{Fore.BLUE}{diff_file_path}{Style.RESET_ALL}")
+                            result['diff_exists'] = True
+                            result['metrics'] = metrics
+                            break
+                        except Exception as e:
+                            logger.error(f"Screenshot attempt {attempt + 1} failed for {new_url}: {e}")
+                            if attempt < max_retries - 1:  # Don't restart on last attempt
+                                print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.YELLOW}Screenshot failed, restarting WebDriver and retrying...{Style.RESET_ALL}")
+                                driver = restart_driver_if_needed(driver, row_number)
+                            else:
+                                print(f"{Fore.LIGHTBLACK_EX}╟─ {Fore.RED}Failed to capture screenshot for {new_url} after {max_retries} attempts{Style.RESET_ALL}")
 
                 # Add result to our collection
                 comparison_results.append(result)
@@ -234,7 +306,9 @@ def fetch_urls(csv_file, output_folder):
                 # Mark row as completed and save progress
                 completed_rows.add(row_number)
                 save_progress(output_folder, completed_rows, comparison_results, csv_file)
-                print(f"{Fore.LIGHTBLACK_EX}╙─ {Fore.BLUE}Complete{Style.RESET_ALL}")
+                # calculate elapsed time for this row
+                elapsed_time = os.times().elapsed - start_time
+                print(f"{Fore.LIGHTBLACK_EX}╙─ {Fore.BLUE}Complete [{Fore.CYAN}{elapsed_time:.2f}s{Fore.BLUE}]{Style.RESET_ALL}")
 
                 row_number += 1
 

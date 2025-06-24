@@ -71,8 +71,9 @@ The tool automatically saves progress as it processes each URL pair, allowing yo
 - **No Data Loss**: Previously completed screenshots and comparisons are preserved - the tool will skip already processed rows
 - **Accurate Statistics**: When resuming, all metrics and reports include data from both previous and current runs for complete accuracy
 - **CSV Validation**: The tool validates that resume data matches the current CSV file - if you run with a different CSV, it will start fresh
+- **WebDriver Recovery**: Automatically detects and recovers from browser connection losses during long-running processes
 
-When you re-run the tool, you'll see a yellow message indicating how many rows are being skipped from previous runs. If you switch to a different CSV file, the tool will detect this and start fresh rather than using incompatible progress data. The final reports will contain all comparison data, ensuring no work is lost.
+When you re-run the tool, you'll see a yellow message indicating how many rows are being skipped from previous runs. If you switch to a different CSV file, the tool will detect this and start fresh rather than using incompatible progress data. The tool also monitors browser health and will automatically restart the browser connection if it becomes unresponsive, ensuring reliable operation during long comparison runs. The final reports will contain all comparison data, ensuring no work is lost.
 
 ## CSV Format
 
