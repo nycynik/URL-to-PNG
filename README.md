@@ -19,9 +19,31 @@ Verify python is working with the dependencies
 
     python -c "import selenium; print(selenium.__version__)"
 
-Run the program
+## Usage
+
+Run the program with your CSV file:
 
     python main.py example.csv
+
+### Options
+
+- `--output_folder` - Specify output directory (default: `output`)
+- `--skip-confirmation` - Skip the confirmation prompt
+- `--reports-only` - Generate reports only from existing data (skip screenshot capture)
+
+Examples:
+
+    # Basic usage
+    python main.py example.csv
+
+    # Custom output folder
+    python main.py example.csv --output_folder my_comparisons
+
+    # Skip confirmation for automation
+    python main.py example.csv --skip-confirmation
+
+    # Regenerate reports only (useful for iterating on report formatting)
+    python main.py example.csv --reports-only
 
 You can replace the CSV with your own list of URL pairs. The CSV should have two columns: the first for old URLs and the second for new URLs to compare. It skips the first row assuming there is a header. Screenshot comparisons are placed in the output folder, which is created if it does not already exist.
 
@@ -30,7 +52,7 @@ You can replace the CSV with your own list of URL pairs. The CSV should have two
 For each URL pair in your CSV, the tool creates a subfolder named with the row number and page title (e.g., `1-Google` or `2-Getting_Started_-_Company_Name`). Each subfolder contains:
 
 - `old.png` - Screenshot of the original URL
-- `new.png` - Screenshot of the updated URL  
+- `new.png` - Screenshot of the updated URL
 - `diff.png` - Visual comparison highlighting differences with color coding:
   - **Red highlights** - Content removed (present in old but not new)
   - **Green highlights** - Content added (present in new but not old)
@@ -46,7 +68,7 @@ The tool provides two types of similarity analysis:
 - Measures pixel-level differences, layout changes, and visual content modifications
 - Reported as a percentage where 100% means visually identical
 
-### Structural Similarity  
+### Structural Similarity
 - Analyzes semantic HTML elements (headings, sections, forms, etc.) between pages
 - Counts elements like `<h1>`, `<h2>`, `<section>`, `<article>`, `<p>`, `<ul>`, etc.
 - Compares element counts to verify content structure consistency

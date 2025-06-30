@@ -1,17 +1,21 @@
-import os
-import time
 import logging
+import os
 import re
+import time
+
+import numpy as np
+from PIL import Image, ImageEnhance
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from PIL import Image, ImageEnhance
-import numpy as np
-from skimage.metrics import structural_similarity as ssim
 from selenium.webdriver.common.by import By
+from skimage.metrics import structural_similarity as ssim
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Configure logging
 logger = logging.getLogger(__name__)
+# Disable PIL's image size limit (this is normally dangerous,
+# but this is not a website/service that can be abused)
+Image.MAX_IMAGE_PIXELS = None
 
 
 def analyze_page_structure(driver, url):
@@ -33,26 +37,52 @@ def analyze_page_structure(driver, url):
 
         driver.get(url)
         time.sleep(2)  # Allow page to load
-        
+
         # Define semantic HTML elements to count
         semantic_elements = [
-            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',  # Headings
-            'section', 'article', 'aside', 'nav', 'header', 'footer', 'main',  # Semantic sections
-            'p',  # Paragraphs
-            'ul', 'ol', 'li',  # Lists
-            'table', 'thead', 'tbody', 'tr', 'th', 'td',  # Tables
-            'form', 'input', 'textarea', 'select', 'button',  # Forms
-            'a',  # Links
-            'img',  # Images
-            'video', 'audio',  # Media
-            'blockquote', 'cite',  # Quotes
-            'code', 'pre',  # Code
-            'figure', 'figcaption'  # Figures
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",  # Headings
+            "section",
+            "article",
+            "aside",
+            "nav",
+            "header",
+            "footer",
+            "main",  # Semantic sections
+            # "p",  # Paragraphs
+            "ul",
+            "ol",
+            "li",  # Lists
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",  # Tables
+            "form",
+            "input",
+            "textarea",
+            "select",
+            "button",  # Forms
+            "a",  # Links
+            "img",  # Images
+            "video",
+            "audio",  # Media
+            "blockquote",
+            "cite",  # Quotes
+            "code",
+            "pre",  # Code
+            "figure",
+            "figcaption",  # Figures
         ]
-        
+
         structure = {}
         total_elements = 0
-        
+
         for element_type in semantic_elements:
             try:
                 elements = driver.find_elements(By.TAG_NAME, element_type)
@@ -62,13 +92,13 @@ def analyze_page_structure(driver, url):
             except Exception as e:
                 logger.warning(f"Could not count {element_type} elements: {e}")
                 structure[element_type] = 0
-        
+
         # Add total count for reference
-        structure['_total_semantic_elements'] = total_elements
-        
+        structure["_total_semantic_elements"] = total_elements
+
         logger.info(f"Analyzed structure for {url}: {total_elements} semantic elements")
         return structure
-        
+
     except Exception as e:
         logger.warning(f"Could not analyze page structure for {url}: {e}")
         return {}
@@ -84,52 +114,40 @@ def calculate_structural_similarity(old_structure, new_structure):
         dict: Structural similarity metrics.
     """
     if not old_structure or not new_structure:
-        return {
-            'structural_similarity': 0.0,
-            'structural_differences': {},
-            'total_structural_changes': 0
-        }
-    
+        return {"structural_similarity": 0.0, "structural_differences": {}, "total_structural_changes": 0}
+
     # Get all element types that appear in either structure
     all_elements = set(old_structure.keys()) | set(new_structure.keys())
-    all_elements.discard('_total_semantic_elements')  # Remove meta field
-    
+    all_elements.discard("_total_semantic_elements")  # Remove meta field
+
     if not all_elements:
-        return {
-            'structural_similarity': 100.0,
-            'structural_differences': {},
-            'total_structural_changes': 0
-        }
-    
+        return {"structural_similarity": 100.0, "structural_differences": {}, "total_structural_changes": 0}
+
     differences = {}
     total_changes = 0
     matching_elements = 0
-    
+
     for element_type in all_elements:
         old_count = old_structure.get(element_type, 0)
         new_count = new_structure.get(element_type, 0)
-        
+
         if old_count != new_count:
             difference = new_count - old_count
-            differences[element_type] = {
-                'old_count': old_count,
-                'new_count': new_count,
-                'difference': difference
-            }
+            differences[element_type] = {"old_count": old_count, "new_count": new_count, "difference": difference}
             total_changes += abs(difference)
         else:
             matching_elements += 1
-    
+
     # Calculate similarity as percentage of elements that match exactly
     total_element_types = len(all_elements)
     similarity_percentage = (matching_elements / total_element_types * 100) if total_element_types > 0 else 100.0
-    
+
     return {
-        'structural_similarity': round(similarity_percentage, 1),
-        'structural_differences': differences,
-        'total_structural_changes': total_changes,
-        'matching_element_types': matching_elements,
-        'total_element_types': total_element_types
+        "structural_similarity": round(similarity_percentage, 1),
+        "structural_differences": differences,
+        "total_structural_changes": total_changes,
+        "matching_element_types": matching_elements,
+        "total_element_types": total_element_types,
     }
 
 
@@ -147,10 +165,10 @@ def trim_bottom_whitespace(image_path, tolerance=5):
         img = Image.open(image_path)
         img_array = np.array(img)
         height, width = img_array.shape[:2]
-        
+
         # Start from the bottom and work upward
         trim_line = height
-        
+
         # Get the bottom row as reference
         if len(img_array.shape) == 3:  # Color image
             bottom_row = img_array[-1, :, :]
@@ -158,7 +176,7 @@ def trim_bottom_whitespace(image_path, tolerance=5):
         else:  # Grayscale
             bottom_row = img_array[-1, :]
             reference_color = np.mean(bottom_row)
-        
+
         # Find where content differs from bottom color
         for y in range(height - 1, -1, -1):
             if len(img_array.shape) == 3:  # Color image
@@ -169,33 +187,35 @@ def trim_bottom_whitespace(image_path, tolerance=5):
                 row = img_array[y, :]
                 row_color = np.mean(row)
                 color_diff = abs(row_color - reference_color)
-            
+
             if color_diff > tolerance:
                 trim_line = y + 1
                 break
-        
+
         # Only trim if we're removing at least 50 pixels and more than 5% of image
         min_trim = 50
         min_percentage = 0.05
         pixels_to_remove = height - trim_line
-        
+
         if pixels_to_remove >= min_trim and pixels_to_remove >= (height * min_percentage):
             # Crop the image
             if len(img_array.shape) == 3:
                 cropped_array = img_array[:trim_line, :, :]
             else:
                 cropped_array = img_array[:trim_line, :]
-            
+
             # Save the cropped image
             cropped_img = Image.fromarray(cropped_array)
-            cropped_img.save(image_path, 'PNG', optimize=True)
-            
-            logger.info(f"Trimmed {pixels_to_remove} pixels from bottom of {image_path} ({pixels_to_remove/height*100:.1f}%)")
+            cropped_img.save(image_path, "PNG", optimize=True)
+
+            logger.info(
+                f"Trimmed {pixels_to_remove} pixels from bottom of {image_path} ({pixels_to_remove/height*100:.1f}%)"
+            )
             return True
-        
+
     except Exception as e:
         logger.warning(f"Could not trim whitespace from {image_path}: {e}")
-    
+
     return False
 
 
@@ -206,7 +226,8 @@ def get_page_title(driver, url):
         driver (webdriver): Selenium WebDriver instance.
         url (str): URL of the page to get title from.
     Returns:
-        Tuple[str, str]: Sanitized page title, or empty string if failed, and original page title, or empty string if failed.
+        Tuple[str, str]: Sanitized page title, or empty string if failed,
+        and original page title, or empty string if failed.
     """
     try:
         # Check if driver session is still valid
@@ -222,9 +243,9 @@ def get_page_title(driver, url):
         # Sanitize title for use in folder name
         if original_title:
             # Remove invalid characters and replace problematic punctuation
-            title = re.sub(r'[<>:"/\\|?*\']', '', original_title)
-            title = re.sub(r'[,;]', '-', title)  # Replace commas and semicolons with dashes
-            title = re.sub(r'\s+', '_', title)  # Replace spaces with underscores (do this last)
+            title = re.sub(r'[<>:"/\\|?*\']', "", original_title)
+            title = re.sub(r"[,;]", "-", title)  # Replace commas and semicolons with dashes
+            title = re.sub(r"\s+", "_", title)  # Replace spaces with underscores (do this last)
             # Limit length
             title = title[:50]
         return [title, original_title]
@@ -256,9 +277,18 @@ def capture_full_page_screenshot(driver, url, save_path):
     time.sleep(2)
 
     # Get the total page dimensions
-    total_width = driver.execute_script("return Math.max(document.body.scrollWidth, document.body.offsetWidth, document.documentElement.clientWidth, document.documentElement.scrollWidth, document.documentElement.offsetWidth);")
-    total_height = driver.execute_script("return Math.max(document.body.scrollHeight, document.body.offsetHeight, document.documentElement.clientHeight, document.documentElement.scrollHeight, document.documentElement.offsetHeight);")
-
+    total_width = driver.execute_script(
+        "return Math.max("
+        "document.body.scrollWidth,document.body.offsetWidth,"
+        "document.documentElement.clientWidth,document.documentElement.scrollWidth,"
+        "document.documentElement.offsetWidth);"
+    )
+    total_height = driver.execute_script(
+        "return Math.max("
+        "document.body.scrollHeight,document.body.offsetHeight,"
+        "document.documentElement.clientHeight,document.documentElement.scrollHeight,"
+        "document.documentElement.offsetHeight);"
+    )
     logger.info(f"Page dimensions: {total_width}x{total_height}")
 
     # Use Chrome's built-in full page screenshot capability
@@ -267,28 +297,29 @@ def capture_full_page_screenshot(driver, url, save_path):
 
     try:
         # Enable full page screenshots in Chrome
-        driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
-            'width': total_width,
-            'height': total_height,
-            'deviceScaleFactor': 1,
-            'mobile': False,
-            'screenWidth': total_width,
-            'screenHeight': total_height,
-        })
+        driver.execute_cdp_cmd(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": total_width,
+                "height": total_height,
+                "deviceScaleFactor": 1,
+                "mobile": False,
+                "screenWidth": total_width,
+                "screenHeight": total_height,
+            },
+        )
 
         # let the window reflow/react to new dimensions
         time.sleep(2)
 
         # Take the screenshot
-        result = driver.execute_cdp_cmd('Page.captureScreenshot', {
-            'format': 'png',
-            'captureBeyondViewport': True
-        })
+        result = driver.execute_cdp_cmd("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True})
 
         # Save the screenshot
         import base64
-        with open(save_path, 'wb') as f:
-            f.write(base64.b64decode(result['data']))
+
+        with open(save_path, "wb") as f:
+            f.write(base64.b64decode(result["data"]))
 
         logger.info(f"Full page screenshot saved: {save_path}")
 
@@ -301,8 +332,8 @@ def capture_full_page_screenshot(driver, url, save_path):
 
     finally:
         # Reset window size
-        driver.set_window_size(original_size['width'], original_size['height'])
-    
+        driver.set_window_size(original_size["width"], original_size["height"])
+
     # Trim bottom whitespace from the screenshot
     trim_bottom_whitespace(save_path)
 
@@ -355,8 +386,8 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
     """
     try:
         # Load both images
-        old_img = Image.open(old_image_path).convert('RGB')
-        new_img = Image.open(new_image_path).convert('RGB')
+        old_img = Image.open(old_image_path).convert("RGB")
+        new_img = Image.open(new_image_path).convert("RGB")
 
         # Get dimensions and ensure they match (resize if needed)
         old_width, old_height = old_img.size
@@ -390,7 +421,7 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
         changed_pixels = np.sum(pixel_diff, axis=2) > threshold
 
         # Create base image (grayscale version of new image for context)
-        gray_new = ImageEnhance.Brightness(new_img.convert('L').convert('RGB')).enhance(0.3)
+        gray_new = ImageEnhance.Brightness(new_img.convert("L").convert("RGB")).enhance(0.3)
         diff_array = np.array(gray_new)
 
         # Highlight changes:
@@ -415,7 +446,7 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
 
         # Convert back to PIL Image and save
         diff_img = Image.fromarray(diff_array.astype(np.uint8))
-        diff_img.save(diff_image_path, 'PNG', optimize=True)
+        diff_img.save(diff_image_path, "PNG", optimize=True)
 
         # Calculate similarity metrics
         total_pixels = max_width * max_height
@@ -424,8 +455,8 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
 
         # Calculate SSIM score
         # Convert to grayscale for SSIM calculation
-        old_gray = np.array(old_img.convert('L'))
-        new_gray = np.array(new_img.convert('L'))
+        old_gray = np.array(old_img.convert("L"))
+        new_gray = np.array(new_img.convert("L"))
 
         # Calculate visual similarity (SSIM)
         ssim_score = ssim(old_gray, new_gray)
@@ -433,7 +464,7 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
 
         # Calculate structural similarity if structure data is provided
         structural_metrics = calculate_structural_similarity(old_structure, new_structure)
-        structural_similarity = structural_metrics.get('structural_similarity', 100.0)
+        structural_similarity = structural_metrics.get("structural_similarity", 100.0)
 
         # Combine visual and structural similarities for overall score
         # Weight visual similarity more heavily (70%) since it's the primary comparison
@@ -451,18 +482,23 @@ def create_diff_image(old_image_path, new_image_path, diff_image_path, old_struc
 
         # Create comprehensive metrics dictionary
         metrics = {
-            'visual_similarity': round(visual_similarity, 1),
-            'structural_similarity': round(structural_similarity, 1),
-            'similarity_score': round(combined_similarity, 1),  # Combined score for backward compatibility
-            'change_percentage': round(change_percentage, 1),
-            'change_magnitude': change_magnitude,
-            'ssim_raw': round(ssim_score, 3),
-            'structural_differences': structural_metrics.get('structural_differences', {}),
-            'total_structural_changes': structural_metrics.get('total_structural_changes', 0)
+            "visual_similarity": round(visual_similarity, 1),
+            "structural_similarity": round(structural_similarity, 1),
+            "similarity_score": round(combined_similarity, 1),  # Combined score for backward compatibility
+            "change_percentage": round(change_percentage, 1),
+            "change_magnitude": change_magnitude,
+            "ssim_raw": round(ssim_score, 3),
+            "structural_differences": structural_metrics.get("structural_differences", {}),
+            "total_structural_changes": structural_metrics.get("total_structural_changes", 0),
         }
 
         logger.info(f"Diff image created: {diff_image_path}")
-        logger.info(f"Visual: {metrics['visual_similarity']}%, Structural: {metrics['structural_similarity']}%, Combined: {metrics['similarity_score']}% ({metrics['change_magnitude']})")
+        logger.info(
+            f"Visual: {metrics['visual_similarity']}%, "
+            f"Structural: {metrics['structural_similarity']}%, "
+            f"Combined: {metrics['similarity_score']}% "
+            f"({metrics['change_magnitude']})"
+        )
 
         return metrics
 
