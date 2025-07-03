@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screenshot Comparison Summary Report</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #007acc;
+            padding-bottom: 10px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+            border-left: 4px solid #007acc;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #007acc;
+        }
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .success-rate {
+            border-left-color: #28a745;
+        }
+        .success-rate .stat-number {
+            color: #28a745;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        .status-icon {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .status-success {
+            color: #28a745;
+        }
+        .status-fail {
+            color: #dc3545;
+        }
+        .file-link {
+            color: #007acc;
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #e3f2fd;
+        }
+        .file-link:hover {
+            background: #bbdefb;
+        }
+        .title-cell {
+            max-width: 300px;
+            padding: 8px 12px;
+        }
+        .title-main {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .title-id {
+            font-size: 0.85em;
+            color: #888;
+            font-family: 'Courier New', monospace;
+            margin-top: 2px;
+        }
+        .metrics-cell {
+            text-align: center;
+            font-weight: 600;
+        }
+        .magnitude-none {
+            color: #155724;
+            background: #c3e6cb;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .magnitude-minimal {
+            color: #28a745;
+            background: #d4edda;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+        .magnitude-moderate {
+            color: #ffc107;
+            background: #fff3cd;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+        .magnitude-significant {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+        .filter-container {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            border: 1px solid #dee2e6;
+        }
+        .filter-group {
+            display: inline-block;
+            margin-right: 20px;
+            margin-bottom: 10px;
+        }
+        .filter-group label {
+            font-weight: 600;
+            margin-right: 8px;
+            color: #495057;
+        }
+        .filter-group select, .filter-group input {
+            padding: 5px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background: white;
+        }
+        .clear-filters {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .clear-filters:hover {
+            background: #5a6268;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .charts-container {
+            display: flex;
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .chart-container {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            flex: 1;
+        }
+        .chart-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            .charts-container {
+                flex-direction: column;
+            }
+        }
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-around;
+            height: 200px;
+            padding: 0 20px;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .bar-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            max-width: 120px;
+        }
+        .bar {
+            width: 60px;
+            margin-bottom: 10px;
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .bar:hover {
+            opacity: 0.8;
+            transform: translateY(-2px);
+        }
+        .bar-none {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-minimal {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-moderate {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-significant {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-range-excellent {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-range-good {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-range-fair {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-range-poor {
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
+        }
+        .bar-value {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: 600;
+            font-size: 0.9em;
+            color: #333;
+        }
+        .bar-label {
+            font-weight: 600;
+            color: #495057;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        .bar-sublabel {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            position: relative;
+            background-color: #fefefe;
+            margin: 2% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 95%;
+            max-width: 1400px;
+            height: 90%;
+            overflow: hidden;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .modal-title {
+            font-size: 1.4em;
+            font-weight: 600;
+            color: #333;
+        }
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        .close:hover {
+            color: #000;
+            background-color: #f8f9fa;
+        }
+        .comparison-container {
+            display: flex;
+            gap: 15px;
+            height: calc(100% - 80px);
+        }
+        .screenshot-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+        .panel-header {
+            background: #343a40;
+            color: white;
+            padding: 12px 15px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .view-selector {
+            background: white;
+            color: #333;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 0.9em;
+        }
+        .screenshot-wrapper {
+            flex: 1;
+            overflow: auto;
+            padding: 15px;
+            background: white;
+        }
+        .screenshot-image {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .view-link {
+            color: #007acc;
+            text-decoration: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            background: rgba(0,122,204,0.1);
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .view-link:hover {
+            background: rgba(0,122,204,0.2);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Screenshot Comparison Summary Report</h1>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">0</div>
+                <div class="stat-label">Total Comparisons</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">0.0%</div>
+                <div class="stat-label">Visual Similarity</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">0.0%</div>
+                <div class="stat-label">Structural Similarity</div>
+            </div>
+            <div class="stat-card success-rate">
+                <div class="stat-number">0.0%</div>
+                <div class="stat-label">Average Similarity</div>
+            </div>
+        </div>
+
+        <div class="filter-container">
+            <h3 style="margin-top: 0; margin-bottom: 15px; color: #333;">Filters</h3>
+            <div class="filter-group">
+                <label for="magnitudeFilter">Magnitude:</label>
+                <select id="magnitudeFilter">
+                    <option value="">All</option>
+                    <option value="None">None</option>
+                    <option value="Minimal">Minimal</option>
+                    <option value="Moderate">Moderate</option>
+                    <option value="Significant">Significant</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="titleFilter">Title:</label>
+                <input type="text" id="titleFilter" placeholder="Search titles...">
+            </div>
+            <div class="filter-group">
+                <label for="statusFilter">Status:</label>
+                <select id="statusFilter">
+                    <option value="">All</option>
+                    <option value="complete">Complete (has diff)</option>
+                    <option value="incomplete">Incomplete</option>
+                </select>
+            </div>
+            <button class="clear-filters" onclick="clearAllFilters()">Clear Filters</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Visual</th>
+                    <th>Structural</th>
+                    <th>Combined</th>
+                    <th>Change %</th>
+                    <th>Magnitude</th>
+                    <th>Old | New | Diff SS</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Comparison Modal -->
+    <div id="comparisonModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">Screenshot Comparison</div>
+                <span class="close">&times;</span>
+            </div>
+            <div class="comparison-container">
+                <div class="screenshot-panel">
+                    <div class="panel-header">
+                        <span>Original</span>
+                        <a id="oldUrlLink" class="view-link" target="_blank" style="display: none;">🔗 View Page</a>
+                    </div>
+                    <div class="screenshot-wrapper">
+                        <img id="oldScreenshot" class="screenshot-image" src="" alt="Original screenshot">
+                    </div>
+                </div>
+                <div class="screenshot-panel">
+                    <div class="panel-header">
+                            <select id="viewSelector" class="view-selector">
+                                <option value="new">New Version</option>
+                                <option value="diff">Difference View</option>
+                            </select>
+                        <a id="newUrlLink" class="view-link" target="_blank" style="display: none;">🔗 View Page</a>
+                    </div>
+                    <div class="screenshot-wrapper">
+                        <img id="newScreenshot" class="screenshot-image" src="" alt="New screenshot">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // Modal functionality
+        let currentNewPath = '';
+        let currentDiffPath = '';
+        let hasDiff = false;
+
+        function closeModal() {
+            document.getElementById('comparisonModal').style.display = 'none';
+        }
+
+        // Event listeners for modal
+        document.querySelector('.close').onclick = closeModal;
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('comparisonModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // View selector change
+        document.getElementById('viewSelector').addEventListener('change', function() {
+            const newScreenshot = document.getElementById('newScreenshot');
+            if (this.value === 'new') {
+                newScreenshot.src = currentNewPath;
+                newScreenshot.alt = 'New screenshot';
+            } else if (this.value === 'diff' && hasDiff) {
+                newScreenshot.src = currentDiffPath;
+                newScreenshot.alt = 'Difference view';
+            }
+        });
+
+        // Synchronized scrolling
+        let isScrolling = false;
+
+        function setupSyncedScrolling() {
+            const leftWrapper = document.querySelector('.screenshot-panel:first-child .screenshot-wrapper');
+            const rightWrapper = document.querySelector('.screenshot-panel:last-child .screenshot-wrapper');
+
+            function syncScroll(source, target) {
+                if (isScrolling) return;
+                isScrolling = true;
+
+                const sourceScrollTop = source.scrollTop;
+                const sourceScrollLeft = source.scrollLeft;
+                const sourceScrollHeight = source.scrollHeight - source.clientHeight;
+                const sourceScrollWidth = source.scrollWidth - source.clientWidth;
+
+                const targetScrollHeight = target.scrollHeight - target.clientHeight;
+                const targetScrollWidth = target.scrollWidth - target.clientWidth;
+
+                // Calculate proportional scroll positions
+                const scrollTopRatio = sourceScrollHeight > 0 ? sourceScrollTop / sourceScrollHeight : 0;
+                const scrollLeftRatio = sourceScrollWidth > 0 ? sourceScrollLeft / sourceScrollWidth : 0;
+
+                target.scrollTop = scrollTopRatio * targetScrollHeight;
+                target.scrollLeft = scrollLeftRatio * targetScrollWidth;
+
+                setTimeout(() => { isScrolling = false; }, 10);
+            }
+
+            leftWrapper.addEventListener('scroll', () => syncScroll(leftWrapper, rightWrapper));
+            rightWrapper.addEventListener('scroll', () => syncScroll(rightWrapper, leftWrapper));
+        }
+
+        // Setup synced scrolling when modal opens
+        function openComparison(title, oldPath, newPath, diffPath, diffExists, metrics, oldUrl, newUrl) {
+            document.getElementById('modalTitle').innerHTML = title;
+
+            // Add metrics to title if provided
+            if (metrics && typeof metrics === 'object') {
+                // Helper function to get color based on similarity score
+                function getSimilarityColor(value) {
+                    if (value >= 90) return '#28a745'; // Green
+                    if (value >= 80) return '#e67e22'; // Darker orange/amber
+                    if (value >= 70) return '#fd7e14'; // Orange
+                    return '#dc3545'; // Red
+                }
+                
+                // Helper function to get color based on change percentage (lower is better)
+                function getChangeColor(value) {
+                    if (value <= 5) return '#28a745'; // Green
+                    if (value <= 15) return '#e67e22'; // Darker orange/amber
+                    if (value <= 30) return '#fd7e14'; // Orange
+                    return '#dc3545'; // Red
+                }
+                
+                // Helper function to get magnitude color
+                function getMagnitudeColor(magnitude) {
+                    switch(magnitude) {
+                        case 'None': return '#28a745'; // Green
+                        case 'Minimal': return '#17a2b8'; // Blue
+                        case 'Moderate': return '#e67e22'; // Darker orange/amber
+                        case 'Significant': return '#dc3545'; // Red
+                        default: return '#666'; // Gray
+                    }
+                }
+                
+                const visualColor = metrics.visual ? getSimilarityColor(metrics.visual) : '#666';
+                const structuralColor = metrics.structural ? getSimilarityColor(metrics.structural) : '#666';
+                const combinedColor = metrics.combined ? getSimilarityColor(metrics.combined) : '#666';
+                const changeColor = metrics.change ? getChangeColor(metrics.change) : '#666';
+                const magnitudeColor = getMagnitudeColor(metrics.magnitude);
+                
+                const metricsHtml = `
+                    <div style="font-size: 0.8em; font-weight: normal; margin-top: 5px;">
+                        Visual: <span style="color: ${visualColor}; font-weight: 600;">${metrics.visual || '-'}%</span> | 
+                        Structural: <span style="color: ${structuralColor}; font-weight: 600;">${metrics.structural || '-'}%</span> |
+                        Combined: <span style="color: ${combinedColor}; font-weight: 600;">${metrics.combined || '-'}%</span> | 
+                        Change: <span style="color: ${changeColor}; font-weight: 600;">${metrics.change || '-'}%</span> |
+                        <span style="color: ${magnitudeColor}; font-weight: 600;">${metrics.magnitude || '-'}</span>
+                    </div>
+                `;
+                document.getElementById('modalTitle').innerHTML = title + metricsHtml;
+            }
+
+            document.getElementById('oldScreenshot').src = oldPath;
+            document.getElementById('newScreenshot').src = newPath;
+
+            // Update URL links if available
+            const oldUrlLink = document.getElementById('oldUrlLink');
+            const newUrlLink = document.getElementById('newUrlLink');
+            
+            if (oldUrl && oldUrl.trim() !== '') {
+                oldUrlLink.href = oldUrl;
+                oldUrlLink.style.display = 'inline-block';
+                oldUrlLink.title = oldUrl;
+            } else {
+                oldUrlLink.style.display = 'none';
+            }
+            
+            if (newUrl && newUrl.trim() !== '') {
+                newUrlLink.href = newUrl;
+                newUrlLink.style.display = 'inline-block';
+                newUrlLink.title = newUrl;
+            } else {
+                newUrlLink.style.display = 'none';
+            }
+
+            currentNewPath = newPath;
+            currentDiffPath = diffPath;
+            hasDiff = diffExists;
+
+            // Update view selector options
+            const selector = document.getElementById('viewSelector');
+            selector.innerHTML = '<option value="new">New Version</option>';
+            if (diffExists) {
+                selector.innerHTML += '<option value="diff">Difference View</option>';
+            }
+            selector.value = 'new';
+
+            document.getElementById('comparisonModal').style.display = 'block';
+
+            // Setup synchronized scrolling after modal is visible and images load
+            setTimeout(setupSyncedScrolling, 100);
+        }
+
+        // Filter functionality
+      function applyFilters() {
+          const magnitudeFilter = document.getElementById('magnitudeFilter').value;
+          const titleFilter = document.getElementById('titleFilter').value.toLowerCase();
+          const statusFilter = document.getElementById('statusFilter').value;
+          const rows = document.querySelectorAll('tbody tr');
+
+          rows.forEach(row => {
+              let show = true;
+              const magnitudeCell = row.cells[6]; // Magnitude column
+              const titleCell = row.cells[1]; // Title column
+              const diffCell = row.cells[9]; // Diff image column
+
+              // Apply magnitude filter
+              if (magnitudeFilter) {
+                  const magnitudeSpan = magnitudeCell.querySelector('span');
+                  const magnitude = magnitudeSpan ? magnitudeSpan.textContent.trim() : '';
+                  if (magnitude !== magnitudeFilter) {
+                      show = false;
+                  }
+              }
+
+              // Apply title filter
+              if (titleFilter) {
+                  const title = titleCell.textContent.toLowerCase();
+                  if (!title.includes(titleFilter)) {
+                      show = false;
+                  }
+              }
+
+              // Apply status filter
+              if (statusFilter) {
+                  const hasDiff = diffCell.querySelector('.status-success');
+                  const status = hasDiff ? 'complete' : 'incomplete';
+                  if (status !== statusFilter) {
+                      show = false;
+                  }
+              }
+
+              row.style.display = show ? '' : 'none';
+          });
+      }
+
+      function clearAllFilters() {
+          document.getElementById('magnitudeFilter').value = '';
+          document.getElementById('titleFilter').value = '';
+          document.getElementById('statusFilter').value = '';
+          applyFilters();
+      }
+
+      // Add event listeners
+      document.getElementById('magnitudeFilter').addEventListener('change', applyFilters);
+      document.getElementById('titleFilter').addEventListener('input', applyFilters);
+      document.getElementById('statusFilter').addEventListener('change', applyFilters);
+
+    </script>
+</body>
+</html>

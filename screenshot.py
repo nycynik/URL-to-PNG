@@ -352,8 +352,20 @@ def fetch_url(url, output_file):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--remote-debugging-port=9223")  # Different port from main.py
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # Set Chrome binary path for macOS
+    chrome_options.binary_location = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Test the connection
+        driver.get("data:text/html,<html><body>Test</body></html>")
+    except Exception as e:
+        logger.error(f"Failed to create WebDriver in screenshot.py: {e}")
+        raise Exception(f"Could not create WebDriver: {e}")
 
     try:
 

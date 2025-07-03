@@ -5,6 +5,9 @@ import os
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# disable E501 for the whole file
+# pylint: disable=C0301
+
 
 def generate_comparison_report_csv(output_folder, comparison_results=None, report_filename="comparison_report.csv"):
     """
@@ -34,8 +37,10 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                 diff_image_rel = os.path.join(result["subfolder_name"], "diff.png") if result["diff_exists"] else ""
 
                 data = {
-                    "row_number": result["row_number"],
+                    "url_hash": result.get("url_hash", ""),
                     "title": result["title"],
+                    "old_url": result["old_url"],
+                    "new_url": result.get("new_url", ""),
                     "old_image": old_image_rel,
                     "new_image": new_image_rel,
                     "diff_image": diff_image_rel,
@@ -82,13 +87,20 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                 if item == report_filename:
                     continue
 
-                # Extract row number and title from folder name
-                if "-" in item:
+                # Extract domain and hash from folder name (new URL-based format)
+                if "_" in item and len(item.split("_")[-1]) == 16:  # URL-based format: domain_hash
+                    parts = item.split("_")
+                    hash_part = parts[-1]
+                    domain_part = "_".join(parts[:-1])
+                    title = domain_part.replace("_", " ")
+                    url_hash = hash_part
+                elif "-" in item:  # Legacy format: number-title
                     row_number, title = item.split("-", 1)
-                    title = title.replace("_", " ")  # Convert underscores back to spaces
+                    title = title.replace("_", " ")
+                    url_hash = ""
                 else:
-                    row_number = item
                     title = "No title available"
+                    url_hash = item if len(item) == 16 else ""
 
                 # Check for required files
                 old_image = os.path.join(subfolder_path, "old.png")
@@ -102,29 +114,38 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
                     new_image_rel = os.path.join(item, "new.png") if os.path.exists(new_image) else ""
                     diff_image_rel = os.path.join(item, "diff.png") if os.path.exists(diff_image) else ""
 
-                    comparison_data.append(
-                        {
-                            "row_number": int(row_number),
-                            "title": title,
-                            "old_image": old_image_rel,
-                            "new_image": new_image_rel,
-                            "diff_image": diff_image_rel,
-                            "folder_name": item,
-                            "visual_similarity": "",
-                            "structural_similarity": "",
-                            "similarity_score": "",
-                            "change_percentage": "",
-                            "change_magnitude": "",
-                        }
-                    )
+                    data_entry = {
+                        "url_hash": url_hash,
+                        "title": title,
+                        "old_url": "",  # Not available from folder scan
+                        "new_url": "",  # Not available from folder scan
+                        "old_image": old_image_rel,
+                        "new_image": new_image_rel,
+                        "diff_image": diff_image_rel,
+                        "folder_name": item,
+                        "visual_similarity": "",
+                        "structural_similarity": "",
+                        "similarity_score": "",
+                        "change_percentage": "",
+                        "change_magnitude": "",
+                    }
 
-        # Sort by row number
-        comparison_data.sort(key=lambda x: x["row_number"])
+                    # Add row_number for backward compatibility if available
+                    if "row_number" in locals():
+                        data_entry["row_number"] = int(row_number)
+
+                    comparison_data.append(data_entry)
+
+        # Sort by row number if available, otherwise by folder name
+        comparison_data.sort(key=lambda x: x.get("row_number", 999999) if x.get("row_number") else x["folder_name"])
 
         # Write the CSV report
         with open(report_path, "w", newline="", encoding="utf-8") as csvfile:
             fieldnames = [
+                "url_hash",
                 "title",
+                "old_url",
+                "new_url",
                 "old_url_screenshot",
                 "new_url_screenshot",
                 "diff_image",
@@ -144,7 +165,10 @@ def generate_comparison_report_csv(output_folder, comparison_results=None, repor
             for data in comparison_data:
                 writer.writerow(
                     {
+                        "url_hash": data["url_hash"],
                         "title": data["title"],
+                        "old_url": data["old_url"],
+                        "new_url": data["new_url"],
                         "old_url_screenshot": data["old_image"],
                         "new_url_screenshot": data["new_image"],
                         "diff_image": data["diff_image"],
@@ -215,13 +239,16 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
 
                 comparison_details.append(
                     {
-                        "row": str(result["row_number"]),
+                        "row": result.get("url_hash", "N/A"),
                         "title": result["title"],
-                        "original_title": result["original_title"],
+                        "original_title": result.get("original_title", result["title"]),
                         "old": result["old_screenshot_exists"],
                         "new": result["new_screenshot_exists"],
                         "diff": result["diff_exists"],
                         "metrics": result["metrics"],
+                        "subfolder_name": result["subfolder_name"],
+                        "old_url": result.get("old_url", ""),
+                        "new_url": result.get("new_url", ""),
                     }
                 )
         else:
@@ -251,28 +278,45 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                 else:
                     failed_comparisons += 1
 
-                # Extract title for details
-                if "-" in item:
+                # Extract title for details (support both old and new formats)
+                if "_" in item and len(item.split("_")[-1]) == 16:  # URL-based format
+                    parts = item.split("_")
+                    hash_part = parts[-1]
+                    domain_part = "_".join(parts[:-1])
+                    title = domain_part.replace("_", " ")
+                    row_identifier = hash_part
+                elif "-" in item:  # Legacy format
                     row_number, title = item.split("-", 1)
                     title = title.replace("_", " ")
+                    row_identifier = row_number
                 else:
-                    row_number = item
+                    row_identifier = item
                     title = "No title"
 
                 comparison_details.append(
                     {
-                        "row": row_number,
+                        "row": row_identifier,
                         "title": title,
                         "original_title": title,
                         "old": old_exists,
                         "new": new_exists,
                         "diff": diff_exists,
                         "metrics": None,
+                        "subfolder_name": item,  # The actual folder name
+                        "old_url": "",
+                        "new_url": "",
                     }
                 )
 
-        # Sort by row number
-        comparison_details.sort(key=lambda x: int(x["row"]))
+        # Sort by row identifier (handle both numeric and hash formats)
+        def sort_key(x):
+            row_val = x["row"]
+            try:
+                return (0, int(row_val))  # Numeric rows first
+            except (ValueError, TypeError):
+                return (1, str(row_val))  # Hash-based rows second, alphabetically
+
+        comparison_details.sort(key=sort_key)
 
         # Calculate metrics
         average_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0
@@ -414,9 +458,21 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
         }
         .title-cell {
             max-width: 300px;
+            padding: 8px 12px;
+        }
+        .title-main {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 2px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        .title-id {
+            font-size: 0.85em;
+            color: #888;
+            font-family: 'Courier New', monospace;
+            margin-top: 2px;
         }
         .metrics-cell {
             text-align: center;
@@ -542,28 +598,28 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
             transform: translateY(-2px);
         }
         .bar-none {
-            background: linear-gradient(135deg, #c3e6cb, #a3d5aa);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-minimal {
-            background: linear-gradient(135deg, #d1ecf1, #aed9e0);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-moderate {
-            background: linear-gradient(135deg, #fff3cd, #ffe69c);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-significant {
-            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-range-excellent {
-            background: linear-gradient(135deg, #d4edda, #a3d5aa);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-range-good {
-            background: linear-gradient(135deg, #cce5ff, #99d6ff);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-range-fair {
-            background: linear-gradient(135deg, #fff3cd, #ffe69c);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-range-poor {
-            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+            background: linear-gradient(135deg, #e9ecef, #ced4da);
         }
         .bar-value {
             position: absolute;
@@ -839,16 +895,14 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
         <table>
             <thead>
                 <tr>
-                    <th>Row</th>
                     <th>Title</th>
                     <th>Visual</th>
                     <th>Structural</th>
                     <th>Combined</th>
                     <th>Change %</th>
                     <th>Magnitude</th>
-                    <th>Old Screenshot</th>
-                    <th>New Screenshot</th>
-                    <th>Diff Image</th>
+                    <th>Old | New | Diff SS</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -856,8 +910,8 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
             )
 
             for detail in comparison_details:
-                # Create folder path for images
-                folder_path = f'{detail["row"]}-{detail["title"].replace(" ", "_")}'
+                # Use the actual subfolder name directly
+                folder_path = detail["subfolder_name"]
 
                 # Create file links if files exist
                 old_link = (
@@ -879,29 +933,54 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                 # Use checkmarks for successful files and add side-by-side view link
                 if detail["old"]:
                     old_link = (
-                        f'<span class="status-icon status-success">✓</span> '
-                        f'<a href="{folder_path}/old.png" class="file-link" target="_blank">View</a>'
+                        "<span>"
+                        f'<a href="{folder_path}/old.png" class="file-link" target="_blank">'
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+                        '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">'
+                        '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'
+                        "</g></svg></a>"
+                        "</span>"
                     )
                 if detail["new"]:
                     new_link = (
-                        f'<span class="status-icon status-success">✓</span> '
-                        f'<a href="{folder_path}/new.png" class="file-link" target="_blank">View</a>'
+                        f'<a href="{folder_path}/new.png" class="file-link" target="_blank">'
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+                        '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">'
+                        '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />'
+                        '<path d="M14 2v4a2 2 0 0 0 2 2h4M9 15h6m-3 3v-6" />'
+                        "</g></svg></a>"
                     )
                 if detail["diff"]:
                     diff_link = (
-                        f'<span class="status-icon status-success">✓</span> '
-                        f'<a href="{folder_path}/diff.png" class="file-link" target="_blank">View</a>'
+                        f'<a href="{folder_path}/diff.png" class="file-link" target="_blank">'
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+                        '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Zm-6 8h6m-3 3V7M9 17h6" />'
+                        "</svg>"
+                        "</a>"
                     )
 
                 # Add side-by-side comparison link if both old and new exist
                 if detail["old"] and detail["new"]:
+                    # Prepare metrics object for JavaScript
+                    metrics_js = "null"
+                    if detail.get("metrics"):
+                        metrics = detail["metrics"]
+                        metrics_js = (
+                            f"{{visual: {metrics.get('visual_similarity', 'null')}, "
+                            f"structural: {metrics.get('structural_similarity', 'null')}, "
+                            f"combined: {metrics.get('similarity_score', 'null')}, "
+                            f"change: {metrics.get('change_percentage', 'null')}, "
+                            f"magnitude: '{metrics.get('change_magnitude', 'N/A')}'}}"
+                        )
+
                     comparison_link = (
                         f'<a class="view-link" onclick="openComparison('
                         f"'{detail['title']}', '{folder_path}/old.png', "
                         f"'{folder_path}/new.png', '{folder_path}/diff.png', "
-                        f"{str(detail['diff']).lower()})\">Compare</a>"
+                        f"{str(detail['diff']).lower()}, {metrics_js}, "
+                        f"'{detail.get('old_url', '')}', '{detail.get('new_url', '')}'"
+                        f')">Compare</a>'
                     )
-                    old_link += f" | {comparison_link}"
 
                 # Add metrics columns
                 visual_cell = ""
@@ -931,16 +1010,17 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
 
                 f.write(
                     f"""                <tr>
-                    <td>{detail['row']}</td>
-                    <td class="title-cell" title="{detail['title']}">{detail['title']}</td>
+                    <td class="title-cell" title="{detail['title']}">
+                        <div class="title-main">{detail['title']}</div>
+                        <div class="title-id">{detail['row']}</div>
+                    </td>
                     <td class="metrics-cell">{visual_cell}</td>
                     <td class="metrics-cell">{structural_cell}</td>
                     <td class="metrics-cell">{combined_cell}</td>
                     <td class="metrics-cell">{change_cell}</td>
                     <td class="metrics-cell">{magnitude_cell}</td>
-                    <td>{old_link}</td>
-                    <td>{new_link}</td>
-                    <td>{diff_link}</td>
+                    <td>{old_link} | {new_link} | {diff_link}</td>
+                    <td>{comparison_link}</td>
                 </tr>
 """
                 )
@@ -961,6 +1041,7 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                 <div class="screenshot-panel">
                     <div class="panel-header">
                         <span>Original</span>
+                        <a id="oldUrlLink" class="view-link" target="_blank" style="display: none;">🔗 View Page</a>
                     </div>
                     <div class="screenshot-wrapper">
                         <img id="oldScreenshot" class="screenshot-image" src="" alt="Original screenshot">
@@ -968,13 +1049,11 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
                 </div>
                 <div class="screenshot-panel">
                     <div class="panel-header">
-                        <span>Comparison</span>
-                        <div class="panel-controls">
                             <select id="viewSelector" class="view-selector">
                                 <option value="new">New Version</option>
                                 <option value="diff">Difference View</option>
                             </select>
-                        </div>
+                        <a id="newUrlLink" class="view-link" target="_blank" style="display: none;">🔗 View Page</a>
                     </div>
                     <div class="screenshot-wrapper">
                         <img id="newScreenshot" class="screenshot-image" src="" alt="New screenshot">
@@ -1050,10 +1129,78 @@ def generate_summary_report(output_folder, comparison_results=None, report_filen
         }
 
         // Setup synced scrolling when modal opens
-        function openComparison(title, oldPath, newPath, diffPath, diffExists) {
-            document.getElementById('modalTitle').textContent = title;
+        function openComparison(title, oldPath, newPath, diffPath, diffExists, metrics, oldUrl, newUrl) {
+            document.getElementById('modalTitle').innerHTML = title;
+
+            // Add metrics to title if provided
+            if (metrics && typeof metrics === 'object') {
+                // Helper function to get color based on similarity score
+                function getSimilarityColor(value) {
+                    if (value >= 90) return '#28a745'; // Green
+                    if (value >= 80) return '#e67e22'; // Darker orange/amber
+                    if (value >= 70) return '#fd7e14'; // Orange
+                    return '#dc3545'; // Red
+                }
+
+                // Helper function to get color based on change percentage (lower is better)
+                function getChangeColor(value) {
+                    if (value <= 5) return '#28a745'; // Green
+                    if (value <= 15) return '#e67e22'; // Darker orange/amber
+                    if (value <= 30) return '#fd7e14'; // Orange
+                    return '#dc3545'; // Red
+                }
+
+                // Helper function to get magnitude color
+                function getMagnitudeColor(magnitude) {
+                    switch(magnitude) {
+                        case 'None': return '#28a745'; // Green
+                        case 'Minimal': return '#17a2b8'; // Blue
+                        case 'Moderate': return '#e67e22'; // Darker orange/amber
+                        case 'Significant': return '#dc3545'; // Red
+                        default: return '#666'; // Gray
+                    }
+                }
+
+                const visualColor = metrics.visual ? getSimilarityColor(metrics.visual) : '#666';
+                const structuralColor = metrics.structural ? getSimilarityColor(metrics.structural) : '#666';
+                const combinedColor = metrics.combined ? getSimilarityColor(metrics.combined) : '#666';
+                const changeColor = metrics.change ? getChangeColor(metrics.change) : '#666';
+                const magnitudeColor = getMagnitudeColor(metrics.magnitude);
+
+                const metricsHtml = `
+                    <div style="font-size: 0.8em; font-weight: normal; margin-top: 5px;">
+                        Visual: <span style="color: ${visualColor}; font-weight: 600;">${metrics.visual || '-'}%</span> |
+                        Structural: <span style="color: ${structuralColor}; font-weight: 600;">${metrics.structural || '-'}%</span> |
+                        Combined: <span style="color: ${combinedColor}; font-weight: 600;">${metrics.combined || '-'}%</span> |
+                        Change: <span style="color: ${changeColor}; font-weight: 600;">${metrics.change || '-'}%</span> |
+                        <span style="color: ${magnitudeColor}; font-weight: 600;">${metrics.magnitude || '-'}</span>
+                    </div>
+                `;
+                document.getElementById('modalTitle').innerHTML = title + metricsHtml;
+            }
+
             document.getElementById('oldScreenshot').src = oldPath;
             document.getElementById('newScreenshot').src = newPath;
+
+            // Update URL links if available
+            const oldUrlLink = document.getElementById('oldUrlLink');
+            const newUrlLink = document.getElementById('newUrlLink');
+
+            if (oldUrl && oldUrl.trim() !== '') {
+                oldUrlLink.href = oldUrl;
+                oldUrlLink.style.display = 'inline-block';
+                oldUrlLink.title = oldUrl;
+            } else {
+                oldUrlLink.style.display = 'none';
+            }
+
+            if (newUrl && newUrl.trim() !== '') {
+                newUrlLink.href = newUrl;
+                newUrlLink.style.display = 'inline-block';
+                newUrlLink.title = newUrl;
+            } else {
+                newUrlLink.style.display = 'none';
+            }
 
             currentNewPath = newPath;
             currentDiffPath = diffPath;
